@@ -1,66 +1,30 @@
-// ═══════════════════════════════════════════════════════════
-//  MAIN.JS — App root component + mount
-// ═══════════════════════════════════════════════════════════
-
 const { createApp } = Vue;
 
 const App = {
-  name: 'App',
-
-  components: {
-    Sidebar,
-    ToastContainer
-  },
-
-  computed: {
-    isPublicRoute() {
-      return this.$route.meta.public;
-    }
-  },
-
+  components: { ToastContainer },
   template: `
     <div>
-      <ToastContainer />
-      <template v-if="isPublicRoute">
-        <router-view />
-      </template>
-      <template v-else>
-        <div class="app-shell">
-          <Sidebar />
-          <div class="main-content">
-            <router-view />
-          </div>
-        </div>
-      </template>
+      <router-view></router-view>
+      <ToastContainer/>
     </div>
   `
 };
 
 const app = createApp(App);
-
-// Register ALL components globally so they work everywhere
 app.component('Sidebar', Sidebar);
-app.component('ToastContainer', ToastContainer);
-app.component('LoginPage', LoginPage);
-app.component('RegisterPage', RegisterPage);
-app.component('AdminDashboard', AdminDashboard);
-app.component('AdminCompanies', AdminCompanies);
-app.component('AdminStudents', AdminStudents);
-app.component('AdminDrives', AdminDrives);
-app.component('AdminApplications', AdminApplications);
-app.component('CompanyDashboard', CompanyDashboard);
-app.component('CompanyDrives', CompanyDrives);
-app.component('CompanyApplications', CompanyApplications);
-app.component('CompanyProfile', CompanyProfile);
-app.component('StudentDashboard', StudentDashboard);
-app.component('StudentDrives', StudentDrives);
-app.component('StudentApplications', StudentApplications);
-app.component('StudentProfile', StudentProfile);
-
 app.use(router);
-
-// Make store + api available everywhere
-app.config.globalProperties.$store = store;
-app.config.globalProperties.$api   = api;
-
 app.mount('#app');
+
+// Ctrl+K global shortcut to open search
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    // Find sidebar component and trigger search
+    const sidebarEl = document.querySelector('[data-sidebar]');
+    // Dispatch custom event that Sidebar listens to
+    document.dispatchEvent(new CustomEvent('open-search'));
+  }
+  if (e.key === 'Escape') {
+    document.dispatchEvent(new CustomEvent('close-search'));
+  }
+});

@@ -2,9 +2,8 @@ from extensions import db
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
-# ─────────────────────────────────────────
-# UNIFIED USER MODEL
-# ─────────────────────────────────────────
+
+# USER
 class User(db.Model):
     __tablename__ = 'users'
 
@@ -35,23 +34,21 @@ class User(db.Model):
         }
 
 
-# ─────────────────────────────────────────
 # STUDENT PROFILE
-# ─────────────────────────────────────────
 class StudentProfile(db.Model):
     __tablename__ = 'student_profiles'
 
-    id          = db.Column(db.Integer, primary_key=True)
-    user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    name        = db.Column(db.String(100), nullable=False)
-    roll_number = db.Column(db.String(50), unique=True)
-    branch      = db.Column(db.String(100))
-    year        = db.Column(db.Integer)
-    cgpa        = db.Column(db.Float)
-    phone       = db.Column(db.String(20))
-    resume_path = db.Column(db.String(256))  # file path to uploaded resume
+    id             = db.Column(db.Integer, primary_key=True)
+    user_id        = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    name           = db.Column(db.String(100), nullable=False)
+    roll_number    = db.Column(db.String(50), unique=True)
+    branch         = db.Column(db.String(100))
+    year           = db.Column(db.Integer)
+    cgpa           = db.Column(db.Float)
+    phone          = db.Column(db.String(20))
+    resume_path    = db.Column(db.String(256))
     is_blacklisted = db.Column(db.Boolean, default=False)
-    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at     = db.Column(db.DateTime, default=datetime.utcnow)
 
     applications = db.relationship('Application', backref='student', lazy=True)
 
@@ -67,13 +64,12 @@ class StudentProfile(db.Model):
             'cgpa': self.cgpa,
             'phone': self.phone,
             'resume_path': self.resume_path,
-            'is_blacklisted': self.is_blacklisted
+            'is_blacklisted': self.is_blacklisted,
+            'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
 
-# ─────────────────────────────────────────
 # COMPANY PROFILE
-# ─────────────────────────────────────────
 class CompanyProfile(db.Model):
     __tablename__ = 'company_profiles'
 
@@ -101,28 +97,27 @@ class CompanyProfile(db.Model):
             'description': self.description,
             'approval_status': self.approval_status,
             'is_blacklisted': self.is_blacklisted,
-            'email': self.user.email
+            'email': self.user.email,
+            'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
 
-# ─────────────────────────────────────────
 # PLACEMENT DRIVE
-# ─────────────────────────────────────────
 class PlacementDrive(db.Model):
     __tablename__ = 'placement_drives'
 
-    id                  = db.Column(db.Integer, primary_key=True)
-    company_id          = db.Column(db.Integer, db.ForeignKey('company_profiles.id'), nullable=False)
-    job_title           = db.Column(db.String(150), nullable=False)
-    job_description     = db.Column(db.Text)
-    eligibility_branch  = db.Column(db.String(200))   # e.g. "CSE,ECE,IT" (comma separated)
-    eligibility_cgpa    = db.Column(db.Float, default=0.0)
-    eligibility_year    = db.Column(db.Integer)        # e.g. 4 (final year)
+    id                   = db.Column(db.Integer, primary_key=True)
+    company_id           = db.Column(db.Integer, db.ForeignKey('company_profiles.id'), nullable=False)
+    job_title            = db.Column(db.String(150), nullable=False)
+    job_description      = db.Column(db.Text)
+    eligibility_branch   = db.Column(db.String(200))   # e.g. "CSE,ECE,IT"
+    eligibility_cgpa     = db.Column(db.Float, default=0.0)
+    eligibility_year     = db.Column(db.Integer)
     application_deadline = db.Column(db.DateTime)
-    package_lpa         = db.Column(db.Float)          # salary in LPA
-    location            = db.Column(db.String(150))
-    status              = db.Column(db.String(20), default='pending')  # pending/approved/closed
-    created_at          = db.Column(db.DateTime, default=datetime.utcnow)
+    package_lpa          = db.Column(db.Float)
+    location             = db.Column(db.String(150))
+    status               = db.Column(db.String(20), default='pending')  # pending/approved/closed
+    created_at           = db.Column(db.DateTime, default=datetime.utcnow)
 
     applications = db.relationship('Application', backref='drive', lazy=True)
 
@@ -144,9 +139,7 @@ class PlacementDrive(db.Model):
         }
 
 
-# ─────────────────────────────────────────
 # APPLICATION
-# ─────────────────────────────────────────
 class Application(db.Model):
     __tablename__ = 'applications'
 
@@ -156,16 +149,20 @@ class Application(db.Model):
     application_date = db.Column(db.DateTime, default=datetime.utcnow)
     status           = db.Column(db.String(20), default='applied')  # applied/shortlisted/selected/rejected
 
-    # Prevent duplicate applications
+    # Prevents a student from applying twice to the same drive
     __table_args__ = (
         db.UniqueConstraint('student_id', 'drive_id', name='unique_application'),
     )
 
     def to_dict(self):
+        sp = self.student
         return {
             'id': self.id,
             'student_id': self.student_id,
-            'student_name': self.student.name,
+            'student_name': sp.name,
+            'branch': sp.branch,
+            'cgpa': sp.cgpa,
+            'resume_path': sp.resume_path,
             'drive_id': self.drive_id,
             'job_title': self.drive.job_title,
             'company_name': self.drive.company.company_name,

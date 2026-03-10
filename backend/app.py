@@ -9,13 +9,13 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # ── Initialize Extensions ────────────────────────────────
+    # Initialize Extensions
     db.init_app(app)
     jwt.init_app(app)
     mail.init_app(app)
     CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-    # ── Register Blueprints (API Routes) ─────────────────────
+    # Register Blueprints (API Routes)
     from routes.auth    import auth_bp
     from routes.admin   import admin_bp
     from routes.company import company_bp
@@ -26,12 +26,18 @@ def create_app():
     app.register_blueprint(company_bp, url_prefix='/api/company')
     app.register_blueprint(student_bp, url_prefix='/api/student')
 
-    # ── Serve Vue Frontend ───────────────────────────────────
+    # Serve Vue Frontend
     @app.route('/')
     def serve_frontend():
         return send_from_directory('../frontend', 'index.html')
 
-    # ── Create DB Tables + Seed Admin ───────────────────────
+    # Serve Uploaded Resumes
+    @app.route('/uploads/<path:filename>')
+    def uploaded_file(filename):
+        upload_folder = os.path.join(os.path.dirname(__file__), 'uploads')
+        return send_from_directory(upload_folder, filename)
+
+    # Create DB Tables + Seed Admin
     with app.app_context():
         db.create_all()
         seed_admin(app)

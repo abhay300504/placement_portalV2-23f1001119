@@ -3,6 +3,12 @@ const LoginPage = {
   data() {
     return { email: '', password: '', loading: false, error: '' };
   },
+  mounted() {
+    // If already logged in, redirect straight to dashboard
+    if (store.isAuthenticated && store.role) {
+      this.$router.replace('/' + store.role + '/dashboard');
+    }
+  },
   methods: {
     async login() {
       this.error = '';
@@ -10,47 +16,50 @@ const LoginPage = {
       this.loading = true;
       try {
         const res = await store.login(this.email, this.password);
+        const role = res.role;
         store.success('Welcome back!');
-        this.$router.push(`/${res.role}/dashboard`);
+        // Use replace so back button does not go back to login
+        this.$router.replace('/' + role + '/dashboard');
       } catch (e) {
-        this.error = e.response?.data?.error || 'Login failed. Check credentials.';
-      } finally { this.loading = false; }
+        this.error = e.response?.data?.error || 'Login failed. Check your credentials.';
+      } finally {
+        this.loading = false;
+      }
     }
   },
   template: `
-    <div class="auth-page">
-      <div class="auth-card">
-        <div class="auth-logo">PlacementHub</div>
-        <div class="auth-tagline">Your campus recruitment portal</div>
+    <div class="auth-wrap">
+      <div class="auth-box">
+        <div class="auth-brand">
+          <span>Placement</span><span>Hub</span>
+        </div>
+        <div class="auth-sub">Campus Recruitment Portal</div>
 
-        <div v-if="error" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:12px 14px;font-size:0.85rem;color:var(--danger);margin-bottom:20px;">
-          <i class="bi bi-exclamation-triangle me-2"></i>{{ error }}
+        <div v-if="error" style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:0.83rem;color:#dc2626;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+          <i class="bi bi-exclamation-circle"></i> {{ error }}
         </div>
 
-        <div class="mb-3">
-          <label class="form-label-dark">Email Address</label>
-          <input v-model="email" type="email" placeholder="you@example.com" class="form-control-dark w-100" @keyup.enter="login"/>
+        <div style="margin-bottom:14px;">
+          <label class="field-label">Username / Email</label>
+          <input v-model="email" type="email" placeholder="Enter your email" class="field-input" @keyup.enter="login"/>
         </div>
 
-        <div class="mb-4">
-          <label class="form-label-dark">Password</label>
-          <input v-model="password" type="password" placeholder="••••••••" class="form-control-dark w-100" @keyup.enter="login"/>
+        <div style="margin-bottom:22px;">
+          <label class="field-label">Password</label>
+          <input v-model="password" type="password" placeholder="Enter your password" class="field-input" @keyup.enter="login"/>
         </div>
 
-        <button class="btn-primary-custom w-100" @click="login" :disabled="loading">
-          <span v-if="loading">Signing in...</span>
-          <span v-else>Sign In</span>
+        <button @click="login" :disabled="loading"
+          style="width:100%;padding:11px;background:#5b21b6;border:none;border-radius:10px;color:white;font-weight:700;font-size:0.95rem;cursor:pointer;font-family:'Inter',sans-serif;">
+          <span v-if="loading">Logging in...</span>
+          <span v-else>Login</span>
         </button>
 
-        <div style="text-align:center;margin-top:20px;font-size:0.85rem;color:var(--text-muted);">
-          New student or company?
-          <span style="color:var(--accent);cursor:pointer;" @click="$router.push('/register')"> Create account</span>
+        <div style="text-align:center;margin-top:18px;font-size:0.85rem;color:#6b7280;">
+          Do not have an account?
+          <span style="color:#5b21b6;cursor:pointer;font-weight:700;" @click="$router.push('/register')"> Register</span>
         </div>
 
-        <div style="margin-top:20px;padding:14px;background:var(--surface);border-radius:8px;font-size:0.78rem;color:var(--text-muted);">
-          <strong style="color:var(--text);display:block;margin-bottom:6px;">Demo Credentials</strong>
-          Admin: admin@institute.com / admin123
-        </div>
       </div>
     </div>
   `

@@ -1,133 +1,188 @@
-// ═══════════════════════════════════════════════════════════
-//  STUDENT DASHBOARD
-// ═══════════════════════════════════════════════════════════
-
 const StudentDashboard = {
   name: 'StudentDashboard',
-  data() {
-    return { data: null, loading: true };
-  },
+  data() { return { data: null, loading: true }; },
   async mounted() {
     try {
-      const res = await api.studentDashboard();
-      this.data = res.data;
-    } catch (e) { store.error('Failed to load dashboard'); }
-    finally { this.loading = false; }
+      const r = await api.studentDashboard();
+      this.data = r.data;
+    } catch(e) {
+      store.error('Failed to load dashboard');
+    } finally {
+      this.loading = false;
+    }
+  },
+  computed: {
+    openDrives()    { return this.data?.open_drives || this.data?.drives_count || 0; },
+    appCount()      { return this.data?.applications_count || this.data?.total_applications || 0; },
+    selectedCount() { return this.data?.selected_count || this.data?.selected || 0; },
+    companies()     { return this.data?.companies || []; },
+    recentApps()    { return this.data?.recent_applications || []; },
+    student()       { return this.data?.student || {}; }
   },
   methods: {
-    statusBadge(s) {
-      return { applied:'badge-applied', shortlisted:'badge-shortlisted', selected:'badge-selected', rejected:'badge-rejected' }[s] || '';
-    },
-    formatDate(d) {
+    fdate(d) {
       if (!d) return '—';
-      return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+      const dt = new Date(d);
+      return (dt.getDate()+'').padStart(2,'0') + '/' +
+             (dt.getMonth()+1+'').padStart(2,'0') + '/' +
+             String(dt.getFullYear()).slice(2);
     },
-    daysLeft(deadline) {
-      if (!deadline) return null;
-      const diff = new Date(deadline) - new Date();
-      const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-      return days;
+    badge(s) {
+      return {
+        applied:     'badge badge-blue',
+        shortlisted: 'badge badge-purple',
+        selected:    'badge badge-green',
+        rejected:    'badge badge-red'
+      }[s] || 'badge badge-gray';
+    },
+    viewDrive(company) {
+      this.$router.push('/student/drives/' + company.drive_id);
     }
   },
   template: `
-    <div>
-      <div class="topbar">
-        <div class="topbar-title">Dashboard</div>
-        <button class="btn-primary-custom" @click="$router.push('/student/drives')">
-          <i class="bi bi-search me-1"></i> Browse Drives
-        </button>
-      </div>
-      <div class="page-body">
-        <div v-if="loading" class="loading-center"><div class="spinner-ring"></div></div>
-        <template v-if="data">
-          <!-- Student Quick Info -->
-          <div class="card-dark mb-4">
-            <div class="card-body-custom">
-              <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-                <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-family:var(--font-head);font-size:1.2rem;font-weight:800;flex-shrink:0;">
-                  {{ data.student.name.charAt(0) }}
-                </div>
-                <div style="flex:1;">
-                  <div style="font-family:var(--font-head);font-size:1.2rem;font-weight:700;">{{ data.student.name }}</div>
-                  <div style="color:var(--text-muted);font-size:0.82rem;">{{ data.student.branch }} · Year {{ data.student.year }} · CGPA {{ data.student.cgpa }}</div>
-                </div>
-                <div style="display:flex;gap:20px;">
-                  <div style="text-align:center;">
-                    <div style="font-family:var(--font-head);font-size:1.6rem;font-weight:800;color:var(--accent);">{{ data.eligible_drives.length }}</div>
-                    <div style="font-size:0.72rem;color:var(--text-muted);">ELIGIBLE DRIVES</div>
-                  </div>
-                  <div style="text-align:center;">
-                    <div style="font-family:var(--font-head);font-size:1.6rem;font-weight:800;color:var(--success);">{{ data.applications.filter(a=>a.status==='selected').length }}</div>
-                    <div style="font-size:0.72rem;color:var(--text-muted);">SELECTED</div>
-                  </div>
-                  <div style="text-align:center;">
-                    <div style="font-family:var(--font-head);font-size:1.6rem;font-weight:800;color:var(--warning);">{{ data.applications.length }}</div>
-                    <div style="font-size:0.72rem;color:var(--text-muted);">APPLIED</div>
-                  </div>
-                </div>
-              </div>
+    <div class="app-shell">
+      <Sidebar/>
+      <div class="main-wrap" style="margin-left:260px;margin-top:60px;">
+        <div class="topbar">
+          <div class="topbar-left">
+            <div class="page-heading">Welcome, {{ student.name || 'Student' }} 👋</div>
+            <div class="page-sub" v-if="student.branch || student.cgpa">
+              {{ student.branch || '' }}{{ student.branch && student.cgpa ? ' — ' : '' }}{{ student.cgpa ? 'CGPA : ' + student.cgpa : '' }}
             </div>
+            <div class="page-sub" v-else>Explore drives and track your placement journey.</div>
           </div>
+        </div>
 
-          <div class="row g-3">
-            <!-- Eligible Drives -->
-            <div class="col-lg-7">
-              <div class="card-dark h-100">
-                <div class="card-header-custom">
-                  <span style="font-family:var(--font-head);font-weight:700;">Eligible Drives</span>
-                  <button class="btn-ghost" @click="$router.push('/student/drives')">View All</button>
-                </div>
-                <div class="card-body-custom">
-                  <div v-if="data.eligible_drives.length===0" class="empty-state" style="padding:30px;">
-                    <i class="bi bi-briefcase"></i>
-                    <p>No eligible drives right now</p>
-                  </div>
-                  <div v-for="d in data.eligible_drives.slice(0,4)" :key="d.id"
-                    style="padding:14px;background:var(--surface);border-radius:10px;margin-bottom:10px;display:flex;align-items:center;gap:12px;">
-                    <div style="flex:1;min-width:0;">
-                      <div style="font-weight:600;font-size:0.9rem;">{{ d.job_title }}</div>
-                      <div style="color:var(--text-muted);font-size:0.78rem;margin-top:2px;">{{ d.company_name }}</div>
-                      <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">
-                        <span v-if="d.package_lpa" style="font-size:0.75rem;color:var(--success);">₹{{ d.package_lpa }} LPA</span>
-                        <span v-if="daysLeft(d.application_deadline) !== null"
-                          :style="daysLeft(d.application_deadline) <= 3 ? 'font-size:0.75rem;color:var(--danger);' : 'font-size:0.75rem;color:var(--text-muted);'">
-                          {{ daysLeft(d.application_deadline) > 0 ? daysLeft(d.application_deadline)+' days left' : 'Expired' }}
-                        </span>
-                      </div>
-                    </div>
-                    <button class="btn-primary-custom" style="padding:6px 14px;font-size:0.8rem;flex-shrink:0;" @click="$router.push('/student/drives')">
-                      Apply
-                    </button>
-                  </div>
-                </div>
-              </div>
+        <div class="page-body">
+          <div v-if="loading" class="loading-box"><div class="spinner"></div></div>
+
+          <template v-if="!loading && data">
+
+            <!-- Resume Warning -->
+            <div v-if="!student.resume_path"
+              style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:12px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+              <span style="font-size:0.85rem;color:#d97706;"><i class="bi bi-exclamation-triangle-fill me-2"></i>Your resume is not uploaded.</span>
+              <button @click="$router.push('/student/profile')"
+                style="background:white;border:1px solid #fcd34d;border-radius:7px;padding:5px 14px;font-size:0.82rem;font-weight:600;color:#d97706;cursor:pointer;font-family:Inter,sans-serif;">
+                Upload Now
+              </button>
             </div>
 
-            <!-- Recent Applications -->
-            <div class="col-lg-5">
-              <div class="card-dark h-100">
-                <div class="card-header-custom">
-                  <span style="font-family:var(--font-head);font-weight:700;">My Applications</span>
-                  <button class="btn-ghost" @click="$router.push('/student/applications')">View All</button>
+            <!-- 3 Stat Cards -->
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+
+              <div class="stat-card" style="padding:20px 24px;display:flex;align-items:center;gap:16px;">
+                <div style="width:46px;height:46px;background:#ede9fe;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#5b21b6;flex-shrink:0;">
+                  <i class="bi bi-briefcase-fill"></i>
                 </div>
-                <div class="card-body-custom">
-                  <div v-if="data.applications.length===0" class="empty-state" style="padding:30px;">
-                    <i class="bi bi-file-earmark-text"></i>
-                    <p>No applications yet</p>
-                  </div>
-                  <div v-for="a in data.applications.slice(0,5)" :key="a.id"
-                    style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border);">
+                <div>
+                  <div style="font-size:2rem;font-weight:800;color:#1a1d23;line-height:1;">{{ openDrives }}</div>
+                  <div style="font-size:0.8rem;color:#9ca3af;margin-top:4px;font-weight:500;">Open Drives</div>
+                </div>
+              </div>
+
+              <div class="stat-card" style="padding:20px 24px;display:flex;align-items:center;gap:16px;">
+                <div style="width:46px;height:46px;background:#ffedd5;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#c2410c;flex-shrink:0;">
+                  <i class="bi bi-file-earmark-text-fill"></i>
+                </div>
+                <div>
+                  <div style="font-size:2rem;font-weight:800;color:#1a1d23;line-height:1;">{{ appCount }}</div>
+                  <div style="font-size:0.8rem;color:#9ca3af;margin-top:4px;font-weight:500;">Applications</div>
+                </div>
+              </div>
+
+              <div class="stat-card" style="padding:20px 24px;display:flex;align-items:center;gap:16px;">
+                <div style="width:46px;height:46px;background:#dcfce7;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#15803d;flex-shrink:0;">
+                  <i class="bi bi-trophy-fill"></i>
+                </div>
+                <div>
+                  <div style="font-size:2rem;font-weight:800;color:#1a1d23;line-height:1;">{{ selectedCount }}</div>
+                  <div style="font-size:0.8rem;color:#9ca3af;margin-top:4px;font-weight:500;">Selected</div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Organizations (Open Drives) -->
+            <div class="card-box mb-4">
+              <div style="padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f3f4f6;">
+                <span style="font-weight:700;color:#1a1d23;font-size:0.95rem;display:flex;align-items:center;gap:8px;">
+                  <i class="bi bi-building" style="color:#5b21b6;"></i> Organizations (Open Drives)
+                </span>
+                <button @click="$router.push('/student/drives')"
+                  style="background:white;border:1px solid #e5e7eb;border-radius:7px;padding:6px 14px;font-size:0.82rem;font-weight:600;color:#374151;cursor:pointer;font-family:Inter,sans-serif;">
+                  View All
+                </button>
+              </div>
+
+              <div v-if="companies.length === 0" style="text-align:center;padding:32px;color:#9ca3af;">
+                <i class="bi bi-building" style="font-size:2rem;display:block;margin-bottom:10px;color:#d1d5db;"></i>
+                No open drives available right now.
+              </div>
+
+              <div v-else>
+                <div v-for="c in companies" :key="c.id"
+                  style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #f9fafb;">
+                  <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:38px;height:38px;background:#ede9fe;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#5b21b6;font-weight:800;font-size:0.95rem;flex-shrink:0;">
+                      {{ (c.company_name||'C').charAt(0).toUpperCase() }}
+                    </div>
                     <div>
-                      <div style="font-size:0.85rem;font-weight:600;">{{ a.job_title }}</div>
-                      <div style="font-size:0.75rem;color:var(--text-muted);">{{ a.company_name }}</div>
+                      <div style="font-weight:700;font-size:0.9rem;color:#1a1d23;">{{ c.company_name }}</div>
+                      <div style="font-size:0.78rem;color:#9ca3af;">{{ c.job_title || c.drive_count + ' drive(s)' }}</div>
                     </div>
-                    <span class="badge-custom" :class="statusBadge(a.status)">{{ a.status }}</span>
                   </div>
+                  <button @click="viewDrive(c)"
+                    style="background:white;border:1px solid #5b21b6;color:#5b21b6;border-radius:7px;padding:6px 16px;font-size:0.8rem;font-weight:600;cursor:pointer;font-family:Inter,sans-serif;white-space:nowrap;">
+                    View Details
+                  </button>
                 </div>
               </div>
             </div>
-          </div>
-        </template>
+
+            <!-- Applied Drives -->
+            <div class="card-box">
+              <div style="padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f3f4f6;">
+                <span style="font-weight:700;color:#1a1d23;font-size:0.95rem;display:flex;align-items:center;gap:8px;">
+                  <i class="bi bi-file-earmark-check" style="color:#5b21b6;"></i> Applied Drives
+                </span>
+                <button @click="$router.push('/student/applications')"
+                  style="background:white;border:1px solid #e5e7eb;border-radius:7px;padding:6px 14px;font-size:0.82rem;font-weight:600;color:#374151;cursor:pointer;font-family:Inter,sans-serif;">
+                  History
+                </button>
+              </div>
+
+              <div v-if="recentApps.length === 0" style="text-align:center;padding:32px;color:#9ca3af;">
+                No applications yet.
+                <span @click="$router.push('/student/drives')" style="color:#5b21b6;cursor:pointer;font-weight:600;margin-left:4px;">Browse drives →</span>
+              </div>
+
+              <div v-else style="overflow-x:auto;">
+                <table class="data-table" style="width:100%;">
+                  <thead>
+                    <tr>
+                      <th>SR NO.</th>
+                      <th>DRIVE</th>
+                      <th>COMPANY</th>
+                      <th>DATE</th>
+                      <th>STATUS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(a, i) in recentApps" :key="a.id">
+                      <td style="color:#9ca3af;font-weight:600;">{{ i + 1 }}</td>
+                      <td style="font-weight:600;color:#1a1d23;">{{ a.job_title }}</td>
+                      <td style="color:#374151;">{{ a.company_name }}</td>
+                      <td style="font-size:0.82rem;color:#6b7280;">{{ fdate(a.application_date) }}</td>
+                      <td><span :class="badge(a.status)">{{ a.status }}</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </template>
+        </div>
       </div>
     </div>
   `

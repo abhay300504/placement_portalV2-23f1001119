@@ -4,7 +4,7 @@ from extensions import make_celery
 flask_app = create_app()
 celery = make_celery(flask_app)
 
-# ── Scheduled Tasks (Beat Schedule) ─────────────────────────
+# Scheduled Tasks (Beat Schedule)
 from celery.schedules import crontab
 
 celery.conf.beat_schedule = {

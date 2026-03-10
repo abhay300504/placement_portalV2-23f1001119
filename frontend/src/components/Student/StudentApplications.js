@@ -1,124 +1,95 @@
-// ═══════════════════════════════════════════════════════════
-//  STUDENT APPLICATIONS
-// ═══════════════════════════════════════════════════════════
-
 const StudentApplications = {
   name: 'StudentApplications',
-  data() {
-    return { applications: [], loading: true, exporting: false, statusFilter: '' };
-  },
+  data() { return { applications: [], loading: true, statusFilter: 'All' }; },
   async mounted() { await this.load(); },
   computed: {
     filtered() {
-      return this.applications.filter(a => !this.statusFilter || a.status === this.statusFilter);
-    },
-    counts() {
-      return {
-        total: this.applications.length,
-        applied: this.applications.filter(a => a.status === 'applied').length,
-        shortlisted: this.applications.filter(a => a.status === 'shortlisted').length,
-        selected: this.applications.filter(a => a.status === 'selected').length,
-        rejected: this.applications.filter(a => a.status === 'rejected').length,
-      };
+      if (this.statusFilter === 'All') return this.applications;
+      return this.applications.filter(a => a.status.toLowerCase() === this.statusFilter.toLowerCase());
     }
   },
   methods: {
     async load() {
-      try {
-        const res = await api.myApplications();
-        this.applications = res.data;
-      } catch (e) { store.error('Failed to load applications'); }
+      try { const r = await api.studentApplications(); this.applications = r.data || []; }
+      catch(e) { store.error('Failed to load applications'); }
       finally { this.loading = false; }
     },
-    async exportCSV() {
-      this.exporting = true;
-      try {
-        await api.exportCSV();
-        store.success('CSV export started! You will receive an email shortly.');
-      } catch (e) {
-        store.error(e.response?.data?.error || 'Export failed');
-      } finally { this.exporting = false; }
-    },
-    statusBadge(s) {
-      return { applied:'badge-applied', shortlisted:'badge-shortlisted', selected:'badge-selected', rejected:'badge-rejected' }[s] || '';
-    },
-    formatDate(d) {
+    fdate(d) {
       if (!d) return '—';
-      return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+    },
+    badge(s) {
+      return { applied:'badge badge-blue', shortlisted:'badge badge-purple', selected:'badge badge-green', rejected:'badge badge-red' }[s] || 'badge badge-gray';
+    },
+    remark(s) {
+      return {
+        applied:     'Application submitted, awaiting review',
+        shortlisted: '🎯 Congratulations! You have been shortlisted',
+        selected:    '🎉 You have been selected!',
+        rejected:    'Better luck next time'
+      }[s] || '—';
+    },
+    countFor(status) {
+      if (status === 'All') return this.applications.length;
+      return this.applications.filter(a => a.status.toLowerCase() === status.toLowerCase()).length;
     }
   },
   template: `
-    <div>
-      <div class="topbar">
-        <div class="topbar-title">My Applications</div>
-        <button class="btn-ghost" @click="exportCSV" :disabled="exporting">
-          <i class="bi bi-download me-1"></i>
-          {{ exporting ? 'Exporting...' : 'Export CSV' }}
-        </button>
-      </div>
-      <div class="page-body">
-        <!-- Summary Stats -->
-        <div class="row g-3 mb-4">
-          <div class="col-6 col-md-3" v-for="(val, key) in counts" :key="key">
-            <div class="stat-card" style="padding:18px;">
-              <div class="stat-value" style="font-size:1.8rem;">{{ val }}</div>
-              <div class="stat-label">{{ key }}</div>
-            </div>
+    <div class="app-shell">
+      <Sidebar/>
+      <div class="main-wrap" style="margin-left:260px;margin-top:60px;">
+        <div class="topbar">
+          <div class="topbar-left">
+            <div class="page-heading">My Applications</div>
+            <div class="page-sub">Track all your placement applications</div>
           </div>
         </div>
 
-        <!-- Filter -->
-        <div class="card-dark mb-4">
-          <div class="card-body-custom">
-            <div class="row g-3 align-items-center">
-              <div class="col-md-4">
-                <select v-model="statusFilter" class="form-select-dark w-100">
-                  <option value="">All Statuses</option>
-                  <option value="applied">Applied</option>
-                  <option value="shortlisted">Shortlisted</option>
-                  <option value="selected">Selected</option>
-                  <option value="rejected">Rejected</option>
-                </select>
-              </div>
-              <div class="col d-flex align-items-center">
-                <span style="color:var(--text-muted);font-size:0.85rem;">{{ filtered.length }} applications</span>
-              </div>
-            </div>
+        <div class="page-body">
+          <!-- Filter Tabs - toggle style like screenshot -->
+          <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+            <button v-for="tab in ['All','Applied','Shortlisted','Selected','Rejected']" :key="tab"
+              @click="statusFilter = tab"
+              :style="statusFilter === tab
+                ? 'background:#5b21b6;color:white;border:1px solid #5b21b6;border-radius:20px;padding:7px 20px;font-size:0.85rem;font-weight:600;cursor:pointer;font-family:Inter,sans-serif;display:flex;align-items:center;gap:6px;'
+                : 'background:white;color:#374151;border:1px solid #e5e7eb;border-radius:20px;padding:7px 20px;font-size:0.85rem;font-weight:600;cursor:pointer;font-family:Inter,sans-serif;display:flex;align-items:center;gap:6px;'">
+              {{ tab }}
+            </button>
           </div>
-        </div>
 
-        <div v-if="loading" class="loading-center"><div class="spinner-ring"></div></div>
+          <div v-if="loading" class="loading-box"><div class="spinner"></div></div>
 
-        <div v-if="!loading && applications.length===0" class="empty-state">
-          <i class="bi bi-file-earmark-text"></i>
-          <p>You haven't applied to any drives yet. <span style="color:var(--accent);cursor:pointer;" @click="$router.push('/student/drives')">Browse drives →</span></p>
-        </div>
+          <div v-else-if="filtered.length === 0" style="text-align:center;padding:48px;color:#9ca3af;">
+            <i class="bi bi-file-earmark-text" style="font-size:2.5rem;display:block;margin-bottom:12px;color:#d1d5db;"></i>
+            No {{ statusFilter === 'All' ? '' : statusFilter.toLowerCase() }} applications yet.
+            <span v-if="statusFilter==='All'" @click="$router.push('/student/drives')"
+              style="color:#5b21b6;cursor:pointer;font-weight:600;margin-left:4px;">Browse drives →</span>
+          </div>
 
-        <div class="card-dark" v-if="!loading && applications.length > 0">
-          <div style="overflow-x:auto;">
-            <table class="table-dark-custom">
+          <div v-else class="card-box" style="overflow-x:auto;">
+            <table class="data-table" style="width:100%;">
               <thead>
-                <tr><th>Company</th><th>Job Title</th><th>Applied On</th><th>Status</th></tr>
+                <tr>
+                  <th>DRIVE NO.</th>
+                  <th>COMPANY</th>
+                  <th>JOB TITLE</th>
+                  <th>DATE</th>
+                  <th>RESULT</th>
+                  <th>REMARK</th>
+                </tr>
               </thead>
               <tbody>
-                <tr v-if="filtered.length===0">
-                  <td colspan="4" style="text-align:center;color:var(--text-muted);padding:40px;">No applications match this filter</td>
-                </tr>
                 <tr v-for="a in filtered" :key="a.id">
-                  <td style="font-weight:600;">{{ a.company_name }}</td>
-                  <td>{{ a.job_title }}</td>
-                  <td style="font-size:0.82rem;color:var(--text-muted);">{{ formatDate(a.application_date) }}</td>
-                  <td><span class="badge-custom" :class="statusBadge(a.status)">{{ a.status }}</span></td>
+                  <td style="color:#9ca3af;font-weight:600;">{{ 1000 + a.drive_id }}</td>
+                  <td style="font-weight:700;color:#1a1d23;">{{ a.company_name }}</td>
+                  <td style="color:#374151;">{{ a.job_title }}</td>
+                  <td style="font-size:0.82rem;color:#6b7280;">{{ fdate(a.application_date) }}</td>
+                  <td><span :class="badge(a.status)">{{ a.status }}</span></td>
+                  <td style="font-size:0.82rem;color:#6b7280;max-width:220px;">{{ remark(a.status) }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
-        </div>
-
-        <!-- Export Info -->
-        <div style="margin-top:16px;padding:14px;background:rgba(79,140,255,0.06);border:1px solid rgba(79,140,255,0.2);border-radius:10px;font-size:0.82rem;color:var(--text-muted);">
-          <i class="bi bi-info-circle me-2" style="color:var(--accent);"></i>
-          Click <strong style="color:var(--text);">Export CSV</strong> to download your full application history. The file will be emailed to your registered address.
         </div>
       </div>
     </div>

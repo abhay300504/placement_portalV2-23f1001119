@@ -1,90 +1,113 @@
-// ═══════════════════════════════════════════════════════════
-//  COMPANY PROFILE
-// ═══════════════════════════════════════════════════════════
-
 const CompanyProfile = {
   name: 'CompanyProfile',
   data() {
-    return { profile: null, loading: true, saving: false, editing: false, form: {} };
+    return {
+      loading: true,
+      saving: false,
+      form: {
+        company_name: '',
+        hr_contact_name: '',
+        hr_phone: '',
+        website: '',
+        description: ''
+      }
+    };
   },
-  async mounted() { await this.load(); },
+  async mounted() {
+    try {
+      // Load profile from dashboard endpoint (has company data)
+      const r = await api.companyDashboard();
+      const c = r.data.company;
+      this.form = {
+        company_name:    c.company_name    || '',
+        hr_contact_name: c.hr_contact_name || '',
+        hr_phone:        c.hr_phone        || '',
+        website:         c.website         || '',
+        description:     c.description     || ''
+      };
+    } catch(e) {
+      store.error('Failed to load profile');
+    } finally {
+      this.loading = false;
+    }
+  },
   methods: {
-    async load() {
-      try {
-        const res = await api.me();
-        this.profile = res.data.profile;
-        this.form = { ...this.profile };
-      } catch (e) { store.error('Failed to load profile'); }
-      finally { this.loading = false; }
-    },
     async save() {
+      if (!this.form.company_name.trim()) { store.error('Company name is required'); return; }
       this.saving = true;
       try {
         await api.updateCompanyProfile(this.form);
-        store.success('Profile updated!');
-        this.editing = false;
-        await this.load();
-      } catch (e) { store.error('Failed to save'); }
-      finally { this.saving = false; }
+        store.success('Profile updated successfully!');
+        this.$router.push('/company/dashboard');
+      } catch(e) {
+        store.error(e.response?.data?.error || 'Failed to save profile');
+      } finally {
+        this.saving = false;
+      }
+    },
+    cancel() {
+      this.$router.push('/company/dashboard');
     }
   },
   template: `
-    <div>
-      <div class="topbar">
-        <div class="topbar-title">Company Profile</div>
-        <button class="btn-ghost" @click="editing=!editing">
-          <i class="bi" :class="editing ? 'bi-x' : 'bi-pencil'"></i> {{ editing ? 'Cancel' : 'Edit' }}
-        </button>
-      </div>
-      <div class="page-body">
-        <div v-if="loading" class="loading-center"><div class="spinner-ring"></div></div>
-        <div class="card-dark" v-if="profile">
-          <div class="card-body-custom">
-            <div style="display:flex;align-items:center;gap:20px;margin-bottom:28px;">
-              <div style="width:72px;height:72px;border-radius:18px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-family:var(--font-head);font-size:1.8rem;font-weight:800;">
-                {{ profile.company_name.charAt(0) }}
-              </div>
-              <div>
-                <div style="font-family:var(--font-head);font-size:1.5rem;font-weight:800;">{{ profile.company_name }}</div>
-                <div style="color:var(--text-muted);margin-top:4px;">{{ profile.email }}</div>
-              </div>
-            </div>
+    <div class="app-shell">
+      <Sidebar/>
+      <div class="main-wrap" style="margin-left:260px;margin-top:60px;">
+        <div class="topbar">
+          <div class="topbar-left">
+            <div class="page-heading">Edit Company Profile</div>
+          </div>
+        </div>
 
-            <div class="row g-3">
-              <div class="col-md-6">
-                <label class="form-label-dark">Company Name</label>
-                <input v-if="editing" v-model="form.company_name" class="form-control-dark w-100"/>
-                <div v-else style="color:var(--text);padding:10px 0;border-bottom:1px solid var(--border);">{{ profile.company_name }}</div>
+        <div class="page-body">
+          <div v-if="loading" class="loading-box"><div class="spinner"></div></div>
+
+          <div v-if="!loading" style="max-width:780px;margin:0 auto;">
+            <div class="card-box" style="padding:32px;">
+              <div style="font-size:1.1rem;font-weight:800;color:#1a1d23;margin-bottom:24px;">Edit Company Profile</div>
+
+              <!-- Company Name -->
+              <div style="margin-bottom:20px;">
+                <label class="field-label">Company Name</label>
+                <input v-model="form.company_name" class="field-input" placeholder="Acme Corp"/>
               </div>
-              <div class="col-md-6">
-                <label class="form-label-dark">HR Contact Name</label>
-                <input v-if="editing" v-model="form.hr_contact_name" class="form-control-dark w-100"/>
-                <div v-else style="color:var(--text);padding:10px 0;border-bottom:1px solid var(--border);">{{ profile.hr_contact_name || '—' }}</div>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label-dark">HR Phone</label>
-                <input v-if="editing" v-model="form.hr_phone" type="tel" class="form-control-dark w-100"/>
-                <div v-else style="color:var(--text);padding:10px 0;border-bottom:1px solid var(--border);">{{ profile.hr_phone || '—' }}</div>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label-dark">Website</label>
-                <input v-if="editing" v-model="form.website" type="url" class="form-control-dark w-100"/>
-                <div v-else style="padding:10px 0;border-bottom:1px solid var(--border);">
-                  <a v-if="profile.website" :href="profile.website" target="_blank" style="color:var(--accent);">{{ profile.website }}</a>
-                  <span v-else style="color:var(--text-muted);">—</span>
+
+              <!-- HR Contact + Phone -->
+              <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                  <label class="field-label">HR Contact Name</label>
+                  <input v-model="form.hr_contact_name" class="field-input" placeholder="Jane Smith"/>
+                </div>
+                <div class="col-md-6">
+                  <label class="field-label">Phone Number</label>
+                  <input v-model="form.hr_phone" class="field-input" placeholder="+91 98765 00000"/>
                 </div>
               </div>
-              <div class="col-12">
-                <label class="form-label-dark">Description</label>
-                <textarea v-if="editing" v-model="form.description" rows="4" class="form-control-dark w-100" style="resize:vertical;"></textarea>
-                <div v-else style="color:var(--text);padding:10px 0;border-bottom:1px solid var(--border);line-height:1.6;">{{ profile.description || '—' }}</div>
-              </div>
-            </div>
 
-            <div v-if="editing" style="margin-top:20px;display:flex;gap:10px;">
-              <button class="btn-primary-custom" @click="save" :disabled="saving">
-                {{ saving ? 'Saving...' : 'Save Changes' }}
-              </button>
+              <!-- Website -->
+              <div style="margin-bottom:20px;">
+                <label class="field-label">Website</label>
+                <input v-model="form.website" class="field-input" placeholder="https://company.com"/>
+              </div>
+
+              <!-- Description -->
+              <div style="margin-bottom:28px;">
+                <label class="field-label">Company Description</label>
+                <textarea v-model="form.description" rows="5" class="field-textarea" placeholder="Tell students about your company..." style="resize:vertical;"></textarea>
+              </div>
+
+              <!-- Buttons -->
+              <div style="display:flex;gap:12px;">
+                <button @click="save" :disabled="saving"
+                  style="background:#5b21b6;border:none;border-radius:8px;color:white;font-weight:700;padding:10px 24px;cursor:pointer;font-family:'Inter',sans-serif;font-size:0.9rem;display:flex;align-items:center;gap:6px;">
+                  <i v-if="!saving" class="bi bi-check2"></i>
+                  <span>{{ saving ? 'Saving...' : 'Save Changes' }}</span>
+                </button>
+                <button @click="cancel"
+                  style="background:white;border:1px solid #e5e7eb;border-radius:8px;color:#374151;font-weight:600;padding:10px 20px;cursor:pointer;font-family:'Inter',sans-serif;font-size:0.9rem;">
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         </div>

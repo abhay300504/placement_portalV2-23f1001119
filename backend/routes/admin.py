@@ -1,203 +1,234 @@
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt
-from extensions import db
-from models import User, StudentProfile, CompanyProfile, PlacementDrive, Application
+from flask import Blueprint, jsonify, request
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from models import db, User, StudentProfile, CompanyProfile, PlacementDrive, Application
+from functools import wraps
 
 admin_bp = Blueprint('admin', __name__)
 
-# ── Helper: Verify Admin ────────────────────────────────────
-def admin_required():
-    claims = get_jwt()
-    if claims.get('role') != 'admin':
-        return False
-    return True
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user_id = get_jwt_identity()
+        user = User.query.get(user_id)
+        if not user or user.role != 'admin':
+            return jsonify({'error': 'Admin access required'}), 403
+        return f(*args, **kwargs)
+    return decorated
 
-
-# ── DASHBOARD STATS ─────────────────────────────────────────
+# DASHBOARD
 @admin_bp.route('/dashboard', methods=['GET'])
 @jwt_required()
+@admin_required
 def dashboard():
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
+    total_students     = StudentProfile.query.count()
+    total_companies    = CompanyProfile.query.count()
+    total_drives       = PlacementDrive.query.count()
+    total_applications = Application.query.count()
+    pending_companies  = CompanyProfile.query.filter_by(approval_status='pending').count()
+    pending_drives     = PlacementDrive.query.filter_by(status='pending').count()
 
-    stats = {
-        'total_students':  StudentProfile.query.count(),
-        'total_companies': CompanyProfile.query.count(),
-        'total_drives':    PlacementDrive.query.count(),
-        'pending_companies': CompanyProfile.query.filter_by(approval_status='pending').count(),
-        'pending_drives':    PlacementDrive.query.filter_by(status='pending').count(),
-        'total_applications': Application.query.count(),
-        'selected_students': Application.query.filter_by(status='selected').count()
-    }
-    return jsonify(stats), 200
+    return jsonify({
+        'total_students':     total_students,
+        'total_companies':    total_companies,
+        'total_drives':       total_drives,
+        'total_applications': total_applications,
+        'pending_companies':  pending_companies,
+        'pending_drives':     pending_drives,
+    }), 200
 
-
-# ── LIST ALL COMPANIES ──────────────────────────────────────
+# COMPANIES
 @admin_bp.route('/companies', methods=['GET'])
 @jwt_required()
+@admin_required
 def get_companies():
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
-
     search = request.args.get('search', '')
-    status = request.args.get('status', '')   # pending/approved/rejected
-
-    query = CompanyProfile.query
+    q = CompanyProfile.query
     if search:
-        query = query.filter(CompanyProfile.company_name.ilike(f'%{search}%'))
-    if status:
-        query = query.filter_by(approval_status=status)
+        q = q.filter(CompanyProfile.company_name.ilike(f'%{search}%'))
+    companies = q.order_by(CompanyProfile.id.desc()).all()
+    result = []
+    for c in companies:
+        d = c.to_dict()
+        d['email'] = c.user.email if c.user else ''
+        result.append(d)
+    return jsonify(result), 200
 
-    companies = query.all()
-    return jsonify([c.to_dict() for c in companies]), 200
+@admin_bp.route('/companies/<int:company_id>', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_company_detail(company_id):
+    company = CompanyProfile.query.get_or_404(company_id)
+    drives  = PlacementDrive.query.filter_by(company_id=company_id).order_by(PlacementDrive.id.desc()).all()
+    c_dict  = company.to_dict()
+    c_dict['email'] = company.user.email if company.user else ''
+    return jsonify({
+        'company': c_dict,
+        'drives':  [d.to_dict() for d in drives]
+    }), 200
 
-
-# ── APPROVE / REJECT COMPANY ────────────────────────────────
 @admin_bp.route('/companies/<int:company_id>/status', methods=['PUT'])
 @jwt_required()
+@admin_required
 def update_company_status(company_id):
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
-
-    data = request.get_json()
-    action = data.get('action')  # 'approve' or 'reject'
-
-    if action not in ['approve', 'reject']:
-        return jsonify({'error': 'action must be approve or reject'}), 400
-
     company = CompanyProfile.query.get_or_404(company_id)
-    company.approval_status = 'approved' if action == 'approve' else 'rejected'
+    action  = request.json.get('action')
+    if action == 'approve':
+        company.approval_status = 'approved'
+        company.user.is_active  = True
+    elif action == 'reject':
+        company.approval_status = 'rejected'
+    else:
+        return jsonify({'error': 'Invalid action'}), 400
     db.session.commit()
+    return jsonify({'message': f'Company {action}d', 'company': company.to_dict()}), 200
 
-    return jsonify({'message': f'Company {action}d successfully', 'company': company.to_dict()}), 200
-
-
-# ── BLACKLIST / DEACTIVATE COMPANY ─────────────────────────
 @admin_bp.route('/companies/<int:company_id>/blacklist', methods=['PUT'])
 @jwt_required()
+@admin_required
 def blacklist_company(company_id):
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
-
-    data = request.get_json()
-    blacklist = data.get('blacklist', True)  # True = blacklist, False = unblacklist
-
     company = CompanyProfile.query.get_or_404(company_id)
-    company.is_blacklisted = blacklist
+    company.is_blacklisted     = request.json.get('blacklist', True)
+    company.user.is_active     = not company.is_blacklisted
     db.session.commit()
+    return jsonify({'message': 'Updated', 'company': company.to_dict()}), 200
 
-    status = 'blacklisted' if blacklist else 'removed from blacklist'
-    return jsonify({'message': f'Company {status}'}), 200
+@admin_bp.route('/companies/<int:company_id>', methods=['DELETE'])
+@jwt_required()
+@admin_required
+def delete_company(company_id):
+    company = CompanyProfile.query.get_or_404(company_id)
+    user = company.user
+    # Delete applications → drives → company profile → user (in order)
+    drives = PlacementDrive.query.filter_by(company_id=company_id).all()
+    for drive in drives:
+        Application.query.filter_by(drive_id=drive.id).delete()
+        db.session.delete(drive)
+    db.session.delete(company)
+    if user: db.session.delete(user)
+    db.session.commit()
+    return jsonify({'message': 'Company deleted'}), 200
 
-
-# ── LIST ALL STUDENTS ───────────────────────────────────────
+# STUDENTS
 @admin_bp.route('/students', methods=['GET'])
 @jwt_required()
+@admin_required
 def get_students():
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
-
     search = request.args.get('search', '')
-    branch = request.args.get('branch', '')
-
-    query = StudentProfile.query
+    q = StudentProfile.query
     if search:
-        query = query.filter(
-            (StudentProfile.name.ilike(f'%{search}%')) |
-            (StudentProfile.roll_number.ilike(f'%{search}%'))
-        )
-    if branch:
-        query = query.filter_by(branch=branch)
+        q = q.filter(StudentProfile.name.ilike(f'%{search}%'))
+    students = q.order_by(StudentProfile.id.desc()).all()
+    result = []
+    for s in students:
+        d = s.to_dict()
+        d['email'] = s.user.email if s.user else ''
+        result.append(d)
+    return jsonify(result), 200
 
-    students = query.all()
-    return jsonify([s.to_dict() for s in students]), 200
-
-
-# ── BLACKLIST STUDENT ───────────────────────────────────────
 @admin_bp.route('/students/<int:student_id>/blacklist', methods=['PUT'])
 @jwt_required()
+@admin_required
 def blacklist_student(student_id):
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
-
-    data = request.get_json()
-    blacklist = data.get('blacklist', True)
-
     student = StudentProfile.query.get_or_404(student_id)
-    student.is_blacklisted = blacklist
+    student.is_blacklisted = request.json.get('blacklist', True)
+    student.user.is_active = not student.is_blacklisted
     db.session.commit()
+    return jsonify({'message': 'Updated', 'student': student.to_dict()}), 200
 
-    status = 'blacklisted' if blacklist else 'removed from blacklist'
-    return jsonify({'message': f'Student {status}'}), 200
-
-
-# ── DEACTIVATE USER ACCOUNT ─────────────────────────────────
-@admin_bp.route('/users/<int:user_id>/deactivate', methods=['PUT'])
+@admin_bp.route('/students/<int:student_id>', methods=['PUT'])
 @jwt_required()
-def deactivate_user(user_id):
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
-
+@admin_required
+def update_student(student_id):
+    student = StudentProfile.query.get_or_404(student_id)
     data = request.get_json()
-    active = data.get('is_active', False)
-
-    user = User.query.get_or_404(user_id)
-    if user.role == 'admin':
-        return jsonify({'error': 'Cannot deactivate admin'}), 400
-    user.is_active = active
+    if 'name'        in data: student.name         = data['name']
+    if 'roll_number' in data: student.roll_number  = data['roll_number']
+    if 'branch'      in data: student.branch       = data['branch']
+    if 'year'        in data: student.year         = data['year']
+    if 'cgpa'        in data: student.cgpa         = data['cgpa']
+    if 'phone'       in data: student.phone        = data['phone']
     db.session.commit()
+    return jsonify({'message': 'Student updated', 'student': student.to_dict()}), 200
 
-    return jsonify({'message': f'User {"activated" if active else "deactivated"}'}), 200
+@admin_bp.route('/students/<int:student_id>', methods=['DELETE'])
+@jwt_required()
+@admin_required
+def delete_student(student_id):
+    student = StudentProfile.query.get_or_404(student_id)
+    user = student.user
+    # Delete applications first, then student profile, then user
+    Application.query.filter_by(student_id=student_id).delete()
+    db.session.delete(student)
+    if user: db.session.delete(user)
+    db.session.commit()
+    return jsonify({'message': 'Student deleted'}), 200
 
-
-# ── LIST ALL DRIVES ─────────────────────────────────────────
+# DRIVES
 @admin_bp.route('/drives', methods=['GET'])
 @jwt_required()
+@admin_required
 def get_drives():
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
+    drives = PlacementDrive.query.order_by(PlacementDrive.id.desc()).all()
+    result = []
+    for d in drives:
+        dd = d.to_dict()
+        dd['company_name'] = d.company.company_name if d.company else ''
+        result.append(dd)
+    return jsonify(result), 200
 
-    status = request.args.get('status', '')
-    query = PlacementDrive.query
-    if status:
-        query = query.filter_by(status=status)
+@admin_bp.route('/drives/<int:drive_id>', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_drive_detail(drive_id):
+    drive = PlacementDrive.query.get_or_404(drive_id)
+    apps  = Application.query.filter_by(drive_id=drive_id).all()
+    d_dict = drive.to_dict()
+    d_dict['company_name'] = drive.company.company_name if drive.company else ''
+    applicants = []
+    for a in apps:
+        ad = a.to_dict()
+        if a.student:
+            ad['student_name']  = a.student.name
+            ad['student_email'] = a.student.user.email if a.student.user else ''
+            ad['branch']        = a.student.branch
+            ad['cgpa']          = a.student.cgpa
+        applicants.append(ad)
+    return jsonify({
+        'drive':      d_dict,
+        'applicants': applicants
+    }), 200
 
-    drives = query.all()
-    return jsonify([d.to_dict() for d in drives]), 200
-
-
-# ── APPROVE / REJECT DRIVE ──────────────────────────────────
 @admin_bp.route('/drives/<int:drive_id>/status', methods=['PUT'])
 @jwt_required()
+@admin_required
 def update_drive_status(drive_id):
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
-
-    data = request.get_json()
-    action = data.get('action')  # 'approve', 'reject', 'close'
-
-    if action not in ['approve', 'reject', 'close']:
-        return jsonify({'error': 'action must be approve, reject, or close'}), 400
-
-    drive = PlacementDrive.query.get_or_404(drive_id)
-
+    drive  = PlacementDrive.query.get_or_404(drive_id)
+    action = request.json.get('action')
     if action == 'approve':
         drive.status = 'approved'
     elif action == 'reject':
         drive.status = 'rejected'
     elif action == 'close':
         drive.status = 'closed'
-
+    else:
+        return jsonify({'error': 'Invalid action'}), 400
     db.session.commit()
     return jsonify({'message': f'Drive {action}d', 'drive': drive.to_dict()}), 200
 
-
-# ── VIEW ALL APPLICATIONS ───────────────────────────────────
+# APPLICATIONS
 @admin_bp.route('/applications', methods=['GET'])
 @jwt_required()
-def get_all_applications():
-    if not admin_required():
-        return jsonify({'error': 'Admin access required'}), 403
-
-    apps = Application.query.all()
-    return jsonify([a.to_dict() for a in apps]), 200
+@admin_required
+def get_applications():
+    apps = Application.query.order_by(Application.id.desc()).all()
+    result = []
+    for a in apps:
+        d = a.to_dict()
+        if a.student:
+            d['student_name']  = a.student.name
+            d['student_email'] = a.student.user.email if a.student.user else ''
+        if a.drive:
+            d['job_title']    = a.drive.job_title
+            d['company_name'] = a.drive.company.company_name if a.drive.company else ''
+        result.append(d)
+    return jsonify(result), 200

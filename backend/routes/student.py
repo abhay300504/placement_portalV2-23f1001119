@@ -1,16 +1,15 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from extensions import db
-from models import StudentProfile, PlacementDrive, Application
-from werkzeug.utils import secure_filename
+from models import StudentProfile, PlacementDrive, Application, CompanyProfile
+from datetime import datetime
 import os
+from werkzeug.utils import secure_filename
 
 student_bp = Blueprint('student', __name__)
 
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+def get_student_profile(user_id):
+    return StudentProfile.query.filter_by(user_id=user_id).first()
 
 def student_required(f):
     from functools import wraps
@@ -22,134 +21,137 @@ def student_required(f):
         return f(*args, **kwargs)
     return decorated
 
-def get_student_profile(user_id):
-    return StudentProfile.query.filter_by(user_id=user_id).first()
 
-
-# ── STUDENT DASHBOARD ───────────────────────────────────────
+# STUDENT DASHBOARD
 @student_bp.route('/dashboard', methods=['GET'])
 @jwt_required()
 @student_required
 def dashboard():
     user_id = get_jwt_identity()
     student = get_student_profile(user_id)
+    if not student:
+        return jsonify({'error': 'Student profile not found'}), 404
 
-    # Get all approved drives
-    drives_query = PlacementDrive.query.filter_by(status='approved')
-
-    # Eligibility filter (drives student qualifies for)
-    all_approved_drives = drives_query.all()
-    eligible_drives = []
-
-    for drive in all_approved_drives:
-        # Check CGPA
-        if student.cgpa and drive.eligibility_cgpa and student.cgpa < drive.eligibility_cgpa:
-            continue
-        # Check year
-        if student.year and drive.eligibility_year and student.year != drive.eligibility_year:
-            continue
-        # Check branch
-        if drive.eligibility_branch:
-            allowed_branches = [b.strip() for b in drive.eligibility_branch.split(',')]
-            if student.branch and student.branch not in allowed_branches:
-                continue
-        eligible_drives.append(drive.to_dict())
+    # Open drives (approved, deadline not passed)
+    open_drives = PlacementDrive.query.filter_by(status='approved').all()
+    open_drives_count = len(open_drives)
 
     # Student's applications
     applications = Application.query.filter_by(student_id=student.id).all()
+    total_applications = len(applications)
+    selected_count = sum(1 for a in applications if a.status == 'selected')
+
+    # One row per open drive (company name + job title + drive_id for View Details)
+    companies = []
+    for drive in open_drives:
+        c = drive.company
+        companies.append({
+            'id': str(c.id) + '_' + str(drive.id),
+            'company_name': c.company_name,
+            'job_title': drive.job_title,
+            'drive_id': drive.id
+        })
+
+    # Recent applications (last 10)
+    recent = Application.query.filter_by(student_id=student.id)\
+        .order_by(Application.application_date.desc()).limit(10).all()
 
     return jsonify({
         'student': student.to_dict(),
-        'eligible_drives': eligible_drives,
-        'applications': [a.to_dict() for a in applications]
+        'open_drives': open_drives_count,
+        'drives_count': open_drives_count,
+        'applications_count': total_applications,
+        'total_applications': total_applications,
+        'selected_count': selected_count,
+        'selected': selected_count,
+        'companies': companies,
+        'companies_count': len(companies),
+        'recent_applications': [a.to_dict() for a in recent]
     }), 200
 
 
-# ── VIEW ALL APPROVED DRIVES (with search/filter) ───────────
+# BROWSE DRIVES
 @student_bp.route('/drives', methods=['GET'])
 @jwt_required()
 @student_required
 def get_drives():
-    search   = request.args.get('search', '')
-    branch   = request.args.get('branch', '')
-    min_pkg  = request.args.get('min_package', type=float)
-    location = request.args.get('location', '')
+    user_id = get_jwt_identity()
+    student = get_student_profile(user_id)
 
-    query = PlacementDrive.query.filter_by(status='approved')
+    drives = PlacementDrive.query.filter_by(status='approved').all()
+    result = []
+    for drive in drives:
+        d = drive.to_dict()
+        # Check if student already applied
+        existing = Application.query.filter_by(
+            student_id=student.id, drive_id=drive.id
+        ).first()
+        d['has_applied'] = existing is not None
+        d['applied'] = existing is not None
+        d['application_status'] = existing.status if existing else None
+        result.append(d)
 
-    if search:
-        query = query.filter(
-            (PlacementDrive.job_title.ilike(f'%{search}%')) |
-            (PlacementDrive.job_description.ilike(f'%{search}%'))
-        )
-    if branch:
-        query = query.filter(PlacementDrive.eligibility_branch.ilike(f'%{branch}%'))
-    if min_pkg:
-        query = query.filter(PlacementDrive.package_lpa >= min_pkg)
-    if location:
-        query = query.filter(PlacementDrive.location.ilike(f'%{location}%'))
-
-    drives = query.all()
-    return jsonify([d.to_dict() for d in drives]), 200
+    return jsonify(result), 200
 
 
-# ── APPLY TO A DRIVE ─────────────────────────────────────────
+# APPLY TO DRIVE
 @student_bp.route('/drives/<int:drive_id>/apply', methods=['POST'])
 @jwt_required()
 @student_required
-def apply_to_drive(drive_id):
+def apply_drive(drive_id):
     user_id = get_jwt_identity()
     student = get_student_profile(user_id)
 
     if student.is_blacklisted:
-        return jsonify({'error': 'Blacklisted students cannot apply'}), 403
+        return jsonify({'error': 'You are blacklisted and cannot apply'}), 403
 
     drive = PlacementDrive.query.get_or_404(drive_id)
-
     if drive.status != 'approved':
         return jsonify({'error': 'This drive is not open for applications'}), 400
 
-    # Check deadline
-    from datetime import datetime
     if drive.application_deadline and datetime.utcnow() > drive.application_deadline:
         return jsonify({'error': 'Application deadline has passed'}), 400
 
-    # Eligibility checks
-    if drive.eligibility_cgpa and student.cgpa and student.cgpa < drive.eligibility_cgpa:
-        return jsonify({'error': f'Minimum CGPA required: {drive.eligibility_cgpa}'}), 400
-
-    if drive.eligibility_year and student.year and student.year != drive.eligibility_year:
-        return jsonify({'error': f'This drive is for year {drive.eligibility_year} students only'}), 400
-
-    if drive.eligibility_branch:
-        allowed = [b.strip() for b in drive.eligibility_branch.split(',')]
-        if student.branch and student.branch not in allowed:
-            return jsonify({'error': f'Your branch is not eligible. Allowed: {drive.eligibility_branch}'}), 400
-
-    # Prevent duplicate applications
     existing = Application.query.filter_by(student_id=student.id, drive_id=drive_id).first()
     if existing:
-        return jsonify({'error': 'You have already applied to this drive'}), 409
+        return jsonify({'error': 'You have already applied to this drive'}), 400
 
-    application = Application(student_id=student.id, drive_id=drive_id)
-    db.session.add(application)
+    app = Application(
+        student_id=student.id,
+        drive_id=drive_id,
+        status='applied'
+    )
+    db.session.add(app)
     db.session.commit()
 
-    return jsonify({'message': 'Applied successfully!', 'application': application.to_dict()}), 201
+    return jsonify({'message': 'Application submitted successfully', 'application': app.to_dict()}), 201
 
 
-# ── VIEW APPLICATION HISTORY ─────────────────────────────────
+# MY APPLICATIONS
 @student_bp.route('/applications', methods=['GET'])
 @jwt_required()
 @student_required
-def my_applications():
+def get_applications():
     user_id = get_jwt_identity()
     student = get_student_profile(user_id)
-    apps = Application.query.filter_by(student_id=student.id).all()
+    apps = Application.query.filter_by(student_id=student.id)\
+        .order_by(Application.application_date.desc()).all()
     return jsonify([a.to_dict() for a in apps]), 200
 
 
-# ── UPDATE STUDENT PROFILE ───────────────────────────────────
+# GET STUDENT PROFILE
+@student_bp.route('/profile', methods=['GET'])
+@jwt_required()
+@student_required
+def get_profile():
+    user_id = get_jwt_identity()
+    student = get_student_profile(user_id)
+    if not student:
+        return jsonify({'error': 'Profile not found'}), 404
+    return jsonify(student.to_dict()), 200
+
+
+# UPDATE STUDENT PROFILE
 @student_bp.route('/profile', methods=['PUT'])
 @jwt_required()
 @student_required
@@ -158,16 +160,17 @@ def update_profile():
     student = get_student_profile(user_id)
 
     data = request.get_json()
-    updatable = ['name', 'phone', 'branch', 'year', 'cgpa', 'roll_number']
-    for field in updatable:
-        if field in data:
-            setattr(student, field, data[field])
+    if data.get('name'):        student.name = data['name']
+    if data.get('phone') is not None:  student.phone = data['phone']
+    if data.get('branch') is not None: student.branch = data['branch']
+    if data.get('cgpa') is not None:   student.cgpa = float(data['cgpa'])
+    if data.get('year') is not None:   student.year = int(data['year'])
 
     db.session.commit()
     return jsonify({'message': 'Profile updated', 'student': student.to_dict()}), 200
 
 
-# ── UPLOAD RESUME ────────────────────────────────────────────
+# UPLOAD RESUME
 @student_bp.route('/profile/resume', methods=['POST'])
 @jwt_required()
 @student_required
@@ -179,34 +182,20 @@ def upload_resume():
         return jsonify({'error': 'No file uploaded'}), 400
 
     file = request.files['resume']
-    if not allowed_file(file.filename):
-        return jsonify({'error': 'Only PDF, DOC, DOCX files are allowed'}), 400
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
 
-    filename = secure_filename(f"student_{student.id}_{file.filename}")
-    upload_folder = current_app.config['UPLOAD_FOLDER']
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'Only PDF files are allowed'}), 400
+
+    filename = secure_filename(f"resume_{student.id}_{int(datetime.utcnow().timestamp())}.pdf")
+    upload_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
     os.makedirs(upload_folder, exist_ok=True)
+
     filepath = os.path.join(upload_folder, filename)
     file.save(filepath)
 
     student.resume_path = filename
     db.session.commit()
 
-    return jsonify({'message': 'Resume uploaded successfully', 'resume': filename}), 200
-
-
-# ── TRIGGER CSV EXPORT (Async) ───────────────────────────────
-@student_bp.route('/export-applications', methods=['POST'])
-@jwt_required()
-@student_required
-def export_applications():
-    user_id = get_jwt_identity()
-    student = get_student_profile(user_id)
-
-    # Import celery task and trigger it
-    from tasks.export_csv import export_student_csv
-    task = export_student_csv.delay(student.id, student.user.email)
-
-    return jsonify({
-        'message': 'CSV export started. You will receive an email when done.',
-        'task_id': task.id
-    }), 202
+    return jsonify({'message': 'Resume uploaded successfully', 'resume_path': filename}), 200

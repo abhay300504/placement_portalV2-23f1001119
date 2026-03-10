@@ -1,186 +1,145 @@
-// ═══════════════════════════════════════════════════════════
-//  STUDENT PROFILE
-// ═══════════════════════════════════════════════════════════
-
 const StudentProfile = {
   name: 'StudentProfile',
-  data() {
-    return {
-      profile: null, loading: true, saving: false, editing: false,
-      uploading: false, form: {}
-    };
-  },
-  async mounted() { await this.load(); },
-  methods: {
-    async load() {
+  data() { return { profile:null, loading:true, saving:false, uploading:false, form:{}, resumeFile:null }; },
+  async mounted() {
+    try {
+      let r;
       try {
-        const res = await api.me();
-        this.profile = res.data.profile;
-        this.form = { ...this.profile };
-      } catch (e) { store.error('Failed to load profile'); }
-      finally { this.loading = false; }
-    },
-    async save() {
-      this.saving = true;
-      try {
-        await api.updateStudentProfile({
-          name: this.form.name, phone: this.form.phone,
-          branch: this.form.branch, year: Number(this.form.year),
-          cgpa: Number(this.form.cgpa), roll_number: this.form.roll_number
-        });
-        store.success('Profile updated!');
-        this.editing = false;
-        await this.load();
-      } catch (e) { store.error('Failed to save'); }
-      finally { this.saving = false; }
-    },
-    async uploadResume(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-      const formData = new FormData();
-      formData.append('resume', file);
-      this.uploading = true;
-      try {
-        await api.uploadResume(formData);
-        store.success('Resume uploaded!');
-        await this.load();
-      } catch (e) {
-        store.error(e.response?.data?.error || 'Upload failed');
-      } finally { this.uploading = false; }
-    },
-    cgpaColor(cgpa) {
-      if (!cgpa) return 'var(--text-muted)';
-      return cgpa >= 8 ? 'var(--success)' : cgpa >= 6 ? 'var(--warning)' : 'var(--danger)';
+        r = await api.studentProfile();
+      } catch(e) {
+        // Fallback: get student data from dashboard
+        r = await api.studentDashboard();
+        r.data = r.data.student;
+      }
+      this.profile = r.data;
+      this.form = {
+        name:        r.data.name        || '',
+        roll_number: r.data.roll_number || '',
+        branch:      r.data.branch      || '',
+        year:        r.data.year        || '',
+        cgpa:        r.data.cgpa        || '',
+        phone:       r.data.phone       || ''
+      };
+    } catch(e) {
+      store.error('Failed to load profile. Please check if Flask is running.');
+    } finally {
+      this.loading = false;
     }
   },
+  methods: {
+    async save() {
+      this.saving=true;
+      try { await api.updateStudentProfile(this.form); store.success('Profile saved!'); const r=await api.studentProfile(); this.profile=r.data; }
+      catch(e) { store.error('Failed'); } finally { this.saving=false; }
+    },
+    onFileChange(e) { this.resumeFile = e.target.files[0]||null; },
+    async uploadResume() {
+      if (!this.resumeFile) { store.error('Select a PDF file'); return; }
+      this.uploading=true;
+      try {
+        const fd = new FormData(); fd.append('resume',this.resumeFile);
+        await api.uploadResume(fd); store.success('Resume uploaded!');
+        const r = await api.studentProfile(); this.profile=r.data; this.form={...r.data}; this.resumeFile=null;
+        this.$refs.fileInput.value='';
+      } catch(e) { store.error(e.response?.data?.error||'Upload failed'); } finally { this.uploading=false; }
+    },
+    cgpaColor(v) { return v>=8?'#15803d':v>=6?'#d97706':'#dc2626'; },
+    branches() { return ['CSE','ECE','EEE','IT','ME','CE','CH','BT','MCA','MBA']; }
+  },
   template: `
-    <div>
-      <div class="topbar">
-        <div class="topbar-title">My Profile</div>
-        <button class="btn-ghost" @click="editing=!editing">
-          <i class="bi" :class="editing ? 'bi-x' : 'bi-pencil'"></i> {{ editing ? 'Cancel' : 'Edit Profile' }}
-        </button>
-      </div>
-      <div class="page-body">
-        <div v-if="loading" class="loading-center"><div class="spinner-ring"></div></div>
-
-        <div v-if="profile" class="row g-3">
-          <!-- Left: Profile Info -->
-          <div class="col-lg-8">
-            <div class="card-dark">
-              <div class="card-body-custom">
-                <!-- Avatar + Name -->
-                <div style="display:flex;align-items:center;gap:16px;margin-bottom:28px;">
-                  <div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-family:var(--font-head);font-size:1.6rem;font-weight:800;flex-shrink:0;">
-                    {{ profile.name.charAt(0) }}
-                  </div>
-                  <div>
-                    <div style="font-family:var(--font-head);font-size:1.4rem;font-weight:800;">{{ profile.name }}</div>
-                    <div style="color:var(--text-muted);font-size:0.82rem;margin-top:4px;">{{ profile.email }}</div>
-                  </div>
-                </div>
-
-                <div class="row g-3">
-                  <div class="col-md-6">
-                    <label class="form-label-dark">Full Name</label>
-                    <input v-if="editing" v-model="form.name" class="form-control-dark w-100"/>
-                    <div v-else style="color:var(--text);padding:10px 0;border-bottom:1px solid var(--border);">{{ profile.name }}</div>
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label-dark">Roll Number</label>
-                    <input v-if="editing" v-model="form.roll_number" class="form-control-dark w-100"/>
-                    <div v-else style="color:var(--text);padding:10px 0;border-bottom:1px solid var(--border);">{{ profile.roll_number || '—' }}</div>
-                  </div>
-                  <div class="col-md-4">
-                    <label class="form-label-dark">Branch</label>
-                    <select v-if="editing" v-model="form.branch" class="form-select-dark w-100">
-                      <option v-for="b in ['CSE','ECE','EEE','IT','ME','CE','CH','BT','MCA','MBA']" :key="b" :value="b">{{ b }}</option>
-                    </select>
-                    <div v-else style="color:var(--text);padding:10px 0;border-bottom:1px solid var(--border);">{{ profile.branch || '—' }}</div>
-                  </div>
-                  <div class="col-md-4">
-                    <label class="form-label-dark">Year of Study</label>
-                    <select v-if="editing" v-model="form.year" class="form-select-dark w-100">
-                      <option v-for="y in [1,2,3,4]" :key="y" :value="y">Year {{ y }}</option>
-                    </select>
-                    <div v-else style="color:var(--text);padding:10px 0;border-bottom:1px solid var(--border);">{{ profile.year ? 'Year '+profile.year : '—' }}</div>
-                  </div>
-                  <div class="col-md-4">
-                    <label class="form-label-dark">CGPA</label>
-                    <input v-if="editing" v-model="form.cgpa" type="number" step="0.1" min="0" max="10" class="form-control-dark w-100"/>
-                    <div v-else style="padding:10px 0;border-bottom:1px solid var(--border);">
-                      <span :style="'color:'+cgpaColor(profile.cgpa)+';font-weight:700;'">{{ profile.cgpa || '—' }}</span>
-                    </div>
-                  </div>
-                  <div class="col-md-6">
-                    <label class="form-label-dark">Phone</label>
-                    <input v-if="editing" v-model="form.phone" type="tel" class="form-control-dark w-100"/>
-                    <div v-else style="color:var(--text);padding:10px 0;border-bottom:1px solid var(--border);">{{ profile.phone || '—' }}</div>
-                  </div>
-                </div>
-
-                <div v-if="editing" style="margin-top:20px;display:flex;gap:10px;">
-                  <button class="btn-primary-custom" @click="save" :disabled="saving">
-                    {{ saving ? 'Saving...' : 'Save Changes' }}
-                  </button>
-                </div>
-              </div>
-            </div>
+    <div class="app-shell">
+      <Sidebar/>
+      <div class="main-wrap" style="margin-left:260px;margin-top:60px;">
+        <div class="topbar">
+          <div class="topbar-left">
+            <div class="page-heading">My Profile</div>
+            <div class="page-sub">Manage your personal and academic details</div>
           </div>
-
-          <!-- Right: Resume Upload -->
-          <div class="col-lg-4">
-            <div class="card-dark">
-              <div class="card-header-custom">
-                <span style="font-family:var(--font-head);font-weight:700;">Resume</span>
+        </div>
+        <div class="page-body">
+          <div v-if="loading" class="loading-box"><div class="spinner"></div></div>
+          <div v-if="!loading" class="row g-4">
+            <!-- Left card -->
+            <div class="col-md-4">
+              <div class="card-box" style="padding:24px;text-align:center;">
+                <div style="width:72px;height:72px;background:#ede9fe;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:1.8rem;color:#5b21b6;">{{ (profile.name||'S').slice(0,1).toUpperCase() }}</div>
+                <div style="font-size:1.05rem;font-weight:800;color:#1a1d23;">{{ profile.name }}</div>
+                <div style="font-size:0.8rem;color:#9ca3af;margin-top:4px;">{{ profile.email }}</div>
+                <div style="margin-top:10px;display:flex;justify-content:center;gap:6px;flex-wrap:wrap;">
+                  <span class="badge badge-purple">{{ profile.branch||'—' }}</span>
+                  <span class="badge badge-blue">Year {{ profile.year||'—' }}</span>
+                  <span :style="'display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:700;background:#dcfce7;color:'+cgpaColor(profile.cgpa)">CGPA {{ profile.cgpa||'—' }}</span>
+                </div>
+                <div v-if="profile.roll_number" style="margin-top:12px;font-size:0.82rem;color:#6b7280;"><i class="bi bi-hash me-1"></i>{{ profile.roll_number }}</div>
+                <div v-if="profile.phone" style="margin-top:4px;font-size:0.82rem;color:#6b7280;"><i class="bi bi-phone me-1"></i>{{ profile.phone }}</div>
+                <div v-if="profile.is_blacklisted" style="margin-top:10px;" class="badge badge-red"><i class="bi bi-slash-circle me-1"></i>Blacklisted</div>
               </div>
-              <div class="card-body-custom">
-                <div v-if="profile.resume_path"
-                  style="padding:14px;background:var(--surface);border-radius:10px;display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-                  <i class="bi bi-file-earmark-pdf" style="font-size:1.5rem;color:var(--danger);"></i>
+              <!-- Resume card -->
+              <div class="card-box mt-3" style="padding:18px 20px;">
+                <div style="font-size:0.78rem;font-weight:700;text-transform:uppercase;color:#9ca3af;margin-bottom:12px;">Resume</div>
+                <div v-if="profile.resume_path" style="display:flex;align-items:center;gap:10px;padding:10px;background:#f5f3ff;border-radius:8px;margin-bottom:12px;">
+                  <i class="bi bi-file-earmark-pdf" style="color:#dc2626;font-size:1.3rem;"></i>
                   <div style="flex:1;min-width:0;">
-                    <div style="font-size:0.85rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ profile.resume_path }}</div>
-                    <div style="font-size:0.72rem;color:var(--success);">Uploaded</div>
+                    <div style="font-size:0.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ profile.resume_path }}</div>
+                    <div style="font-size:0.72rem;color:#9ca3af;">Uploaded</div>
                   </div>
+                  <a :href="'http://127.0.0.1:5000/uploads/'+profile.resume_path" target="_blank" class="btn-view" style="flex-shrink:0;">View</a>
                 </div>
-                <div v-else style="padding:24px;border:2px dashed var(--border);border-radius:10px;text-align:center;margin-bottom:16px;color:var(--text-muted);">
-                  <i class="bi bi-cloud-upload" style="font-size:2rem;display:block;margin-bottom:8px;"></i>
-                  No resume uploaded
+                <div v-else style="text-align:center;padding:12px;background:#fafafa;border:1.5px dashed #d1d5db;border-radius:8px;margin-bottom:12px;color:#9ca3af;font-size:0.83rem;">
+                  <i class="bi bi-cloud-upload" style="font-size:1.4rem;display:block;margin-bottom:6px;"></i>No resume uploaded
                 </div>
-
-                <label style="display:block;width:100%;">
-                  <input type="file" accept=".pdf,.doc,.docx" style="display:none;" @change="uploadResume"/>
-                  <div class="btn-primary-custom w-100" style="text-align:center;cursor:pointer;">
-                    <span v-if="uploading"><i class="bi bi-arrow-repeat me-2"></i>Uploading...</span>
-                    <span v-else"><i class="bi bi-upload me-2"></i>{{ profile.resume_path ? 'Replace Resume' : 'Upload Resume' }}</span>
-                  </div>
-                </label>
-                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:8px;text-align:center;">PDF, DOC, DOCX · Max 5MB</div>
+                <label class="field-label">Upload / Replace Resume (PDF only)</label>
+                <input ref="fileInput" type="file" accept=".pdf" class="field-input" @change="onFileChange" style="padding:6px;cursor:pointer;"/>
+                <button v-if="resumeFile" @click="uploadResume" :disabled="uploading"
+                  style="width:100%;margin-top:10px;padding:9px;background:#5b21b6;border:none;border-radius:8px;color:white;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;font-size:0.85rem;">
+                  <span v-if="uploading"><i class="bi bi-arrow-repeat me-1"></i>Uploading...</span>
+                  <span v-else><i class="bi bi-cloud-upload me-1"></i>Upload Resume</span>
+                </button>
               </div>
             </div>
 
-            <!-- Quick Stats -->
-            <div class="card-dark" style="margin-top:12px;">
-              <div class="card-body-custom">
-                <div style="font-family:var(--font-head);font-weight:700;margin-bottom:14px;">Eligibility Status</div>
-                <div style="display:flex;flex-direction:column;gap:10px;">
-                  <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span style="font-size:0.82rem;color:var(--text-muted);">CGPA</span>
-                    <span :style="'font-weight:700;color:'+cgpaColor(profile.cgpa)">{{ profile.cgpa || 'Not set' }}</span>
-                  </div>
-                  <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span style="font-size:0.82rem;color:var(--text-muted);">Branch</span>
-                    <span style="font-weight:600;">{{ profile.branch || 'Not set' }}</span>
-                  </div>
-                  <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span style="font-size:0.82rem;color:var(--text-muted);">Year</span>
-                    <span style="font-weight:600;">{{ profile.year ? 'Year '+profile.year : 'Not set' }}</span>
-                  </div>
-                  <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span style="font-size:0.82rem;color:var(--text-muted);">Resume</span>
-                    <span :style="'font-weight:600;color:'+(profile.resume_path?'var(--success)':'var(--danger)')">
-                      {{ profile.resume_path ? '✓ Uploaded' : '✗ Missing' }}
-                    </span>
+            <!-- Right: Edit Form -->
+            <div class="col-md-8">
+              <div class="card-box">
+                <div class="card-head"><span class="card-title"><i class="bi bi-pencil"></i> Edit Profile</span></div>
+                <div style="padding:24px;">
+                  <div class="row g-3">
+                    <div class="col-md-7">
+                      <label class="field-label">Full Name</label>
+                      <input v-model="form.name" class="field-input" placeholder="John Doe"/>
+                    </div>
+                    <div class="col-md-5">
+                      <label class="field-label">Roll Number</label>
+                      <input v-model="form.roll_number" class="field-input" placeholder="2021CS001"/>
+                    </div>
+                    <div class="col-md-4">
+                      <label class="field-label">Branch</label>
+                      <select v-model="form.branch" class="field-select">
+                        <option value="">Select branch</option>
+                        <option v-for="b in branches()" :key="b" :value="b">{{ b }}</option>
+                      </select>
+                    </div>
+                    <div class="col-md-4">
+                      <label class="field-label">Year</label>
+                      <select v-model="form.year" class="field-select">
+                        <option value="">Select year</option>
+                        <option v-for="y in [1,2,3,4]" :key="y" :value="y">Year {{ y }}</option>
+                      </select>
+                    </div>
+                    <div class="col-md-4">
+                      <label class="field-label">CGPA</label>
+                      <input v-model="form.cgpa" type="number" step="0.1" min="0" max="10" class="field-input" placeholder="8.5"/>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="field-label">Phone</label>
+                      <input v-model="form.phone" class="field-input" placeholder="+91 9876543210"/>
+                    </div>
+                    <div class="col-12">
+                      <button @click="save" :disabled="saving" style="background:#5b21b6;border:none;border-radius:10px;color:white;font-weight:700;padding:10px 24px;cursor:pointer;font-family:'Inter',sans-serif;font-size:0.9rem;">
+                        <span v-if="saving">Saving...</span>
+                        <span v-else><i class="bi bi-check2 me-1"></i>Save Changes</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

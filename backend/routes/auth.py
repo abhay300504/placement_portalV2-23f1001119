@@ -6,7 +6,7 @@ from datetime import timedelta
 
 auth_bp = Blueprint('auth', __name__)
 
-# ── REGISTER (Student or Company) ──────────────────────────
+# REGISTER (Student or Company)
 @auth_bp.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -109,7 +109,7 @@ def login():
     }), 200
 
 
-# ── GET CURRENT USER INFO ───────────────────────────────────
+# GET CURRENT USER INFO
 @auth_bp.route('/me', methods=['GET'])
 @jwt_required()
 def me():
